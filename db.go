@@ -113,6 +113,32 @@ func (db *DB) Get(key []byte) ([]byte, error) {
 	return logRecord.Value, nil
 }
 
+func (db *DB) Delete(key []byte) error {
+	if len(key) == 0 {
+		return ErrKeyIsEmpty
+	}
+
+	if pos := db.index.Get(key); pos == nil {
+		return nil
+	}
+
+	logRecord := &data.LogRecord{
+		Key:  key,
+		Type: data.LogRecordDelete,
+	}
+
+	_, err := db.appendLogRecord(logRecord)
+	if err != nil {
+		return nil
+	}
+
+	ok := db.index.Delete(key)
+	if !ok {
+		return ErrIndexUpdateFailed
+	}
+	return nil
+}
+
 func (db *DB) appendLogRecord(logRecord *data.LogRecord) (*data.LogRecordPos, error) {
 	db.mtx.Lock()
 	defer db.mtx.Unlock()
@@ -233,11 +259,14 @@ func (db *DB) LoadIndexFromFiles() error {
 				Fid:    fileId,
 				Offset: offSet,
 			}
-
+			var ok bool
 			if logRecord.Type != data.LogRecordNormal {
-				db.index.Delete(logRecord.Key)
+				ok = db.index.Delete(logRecord.Key)
 			} else {
-				db.index.Put(logRecord.Key, logRecordPos)
+				ok = db.index.Put(logRecord.Key, logRecordPos)
+			}
+			if !ok {
+				return ErrIndexUpdateFailed
 			}
 			offSet += size
 		}
