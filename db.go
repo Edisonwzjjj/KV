@@ -3,6 +3,11 @@ package KV
 import (
 	"KV/data"
 	"KV/index"
+	"io"
+	"os"
+	"sort"
+	"strconv"
+	"strings"
 	"sync"
 )
 
@@ -10,9 +15,45 @@ import (
 type DB struct {
 	options Options
 	mtx     *sync.RWMutex
+	fileIds []int                     // 只能在加载索引时用
 	active  *data.DataFile            // 可以写的文件
 	old     map[uint32]*data.DataFile //过期文件
 	index   index.Indexer
+}
+
+func Open(op Options) (*DB, error) {
+	//配置校验
+	if err := checkOptions(op); err != nil {
+		return nil, err
+	}
+
+	//目录检验，不存在需要创建
+	if _, err := os.Stat(op.DirPath); os.IsNotExist(err) {
+		if err := os.Mkdir(op.DirPath, os.ModePerm); err != nil {
+			return nil, err
+		}
+
+	}
+	db := &DB{
+		options: op,
+		mtx:     new(sync.RWMutex),
+		active:  nil,
+		old:     make(map[uint32]*data.DataFile),
+		index:   index.NewIndexer(index.IndexerType(op.IndexType)),
+	}
+
+	//加载文件
+	if err := db.LoadDataFiles(); err != nil {
+		return nil, err
+	}
+
+	//加载索引
+
+	if err := db.LoadIndexFromFiles(); err != nil {
+		return nil, err
+	}
+
+	return db, nil
 }
 
 func (db *DB) Put(key []byte, value []byte) error {
@@ -60,7 +101,7 @@ func (db *DB) Get(key []byte) ([]byte, error) {
 		return nil, ErrDataFileNotFound
 	}
 
-	logRecord, err := dataFile.ReadLogRecord(pos.Offset)
+	logRecord, _, err := dataFile.ReadLogRecord(pos.Offset)
 	if err != nil {
 		return nil, err
 	}
@@ -123,5 +164,100 @@ func (db *DB) setActiveDatafile() error {
 		return err
 	}
 	db.active = file
+	return nil
+}
+
+func (db *DB) LoadDataFiles() error {
+	dirEntries, err := os.ReadDir(db.options.DirPath)
+	if err != nil {
+		return err
+	}
+
+	var fileIds []int
+	//遍历目录，后缀.data
+	for _, entry := range dirEntries {
+		if strings.HasSuffix(entry.Name(), data.DataFileNameSuffix) {
+			splitNames := strings.Split(entry.Name(), ".")
+			fileId, err := strconv.Atoi(splitNames[0])
+			if err != nil {
+				return ErrDataDirctoryCorrupt
+			}
+			fileIds = append(fileIds, fileId)
+
+		}
+	}
+
+	sort.Ints(fileIds)
+	db.fileIds = fileIds
+
+	for idx, fileId := range fileIds {
+		dataFile, err := data.OpenDataFIle(db.options.DirPath, uint32(fileId))
+		if err != nil {
+			return err
+		}
+
+		//最后一个是可写文件
+		if idx == len(fileIds)-1 {
+			db.active = dataFile
+		} else {
+			db.old[uint32(fileId)] = dataFile
+		}
+	}
+	return nil
+}
+
+func (db *DB) LoadIndexFromFiles() error {
+	if len(db.fileIds) == 0 {
+		return nil
+	}
+
+	for idx, fid := range db.fileIds {
+		var dataFile *data.DataFile
+		var fileId = uint32(fid)
+		if db.active.FileId == fileId {
+			dataFile = db.active
+		} else {
+			dataFile = db.old[fileId]
+		}
+
+		var offSet uint64 = 0
+		for {
+			logRecord, size, err := dataFile.ReadLogRecord(offSet)
+			if err != nil {
+				if err == io.EOF {
+					break
+				}
+				return err
+			}
+			logRecordPos := &data.LogRecordPos{
+				Fid:    fileId,
+				Offset: offSet,
+			}
+
+			if logRecord.Type != data.LogRecordNormal {
+				db.index.Delete(logRecord.Key)
+			} else {
+				db.index.Put(logRecord.Key, logRecordPos)
+			}
+			offSet += size
+		}
+
+		if idx == len(db.fileIds)-1 {
+			db.active.WriteOffset = offSet
+		}
+	}
+
+	return nil
+}
+
+func checkOptions(option Options) error {
+	if option.DirPath == "" {
+		return ErrDirIsEmpty
+	}
+
+	if option.DataFileSize <= 0 {
+		return ErrInvalidDataFileSize
+	}
+
 	return nil
 }

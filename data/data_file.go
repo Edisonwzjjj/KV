@@ -2,6 +2,8 @@ package data
 
 import "KV/fio"
 
+const DataFileNameSuffix = ".data"
+
 type DataFile struct {
 	FileId      uint32
 	WriteOffset uint64
@@ -20,6 +22,6 @@ func (f *DataFile) Write(buf []byte) error {
 	return nil
 }
 
-func (f *DataFile) ReadLogRecord(offset uint64) (*LogRecord, error) {
-	return nil, nil
+func (f *DataFile) ReadLogRecord(offset uint64) (*LogRecord, uint64, error) {
+	return nil, 0, nil
 }
