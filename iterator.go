@@ -12,7 +12,7 @@ type Iterator struct {
 }
 
 func (db *DB) NewIterator(op IteratorOptions) *Iterator {
-	indexIterator := db.index.Iterator(op.reverse)
+	indexIterator := db.index.Iterator(op.Reverse)
 	return &Iterator{
 		indexIter: indexIterator,
 		db:        db,
@@ -21,14 +21,14 @@ func (db *DB) NewIterator(op IteratorOptions) *Iterator {
 }
 
 func (it *Iterator) SkipToNext() {
-	prefixLen := len(it.option.prefix)
+	prefixLen := len(it.option.Prefix)
 	if prefixLen == 0 {
 		return
 	}
 
 	for ; it.indexIter.Valid(); it.indexIter.Next() {
 		k := it.indexIter.Key()
-		if prefixLen <= len(k) && bytes.Compare(it.option.prefix, k[:prefixLen]) == 0 {
+		if prefixLen <= len(k) && bytes.Compare(it.option.Prefix, k[:prefixLen]) == 0 {
 			break
 		}
 	}
@@ -61,7 +61,7 @@ func (it *Iterator) Value() ([]byte, error) {
 	logRecordPos := it.indexIter.Value()
 	it.db.mu.RLock()
 	defer it.db.mu.RUnlock()
-	return it.db.getValueByPos(logRecordPos)
+	return it.db.getValueByPosition(logRecordPos)
 
 }
 
