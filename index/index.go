@@ -48,3 +48,15 @@ type Item struct {
 func (ai *Item) Less(bi btree.Item) bool {
 	return bytes.Compare(ai.key, bi.(*Item).key) == -1
 }
+
+type Iterator interface {
+	// Rewind 回到起点
+	Rewind()
+	// Seek 查找
+	Seek(key []byte)
+	Next()
+	Valid() bool
+	Key() []byte
+	Value() *data.LogRecordPos
+	Close()
+}
