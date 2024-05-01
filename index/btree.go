@@ -48,6 +48,10 @@ func (bt *BTree) Delete(key []byte) bool {
 	return true
 }
 
+func (bt *BTree) Size() int {
+	return bt.tree.Len()
+}
+
 type btreeIterator struct {
 	curr    int
 	reverse bool

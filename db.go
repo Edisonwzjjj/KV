@@ -129,6 +129,38 @@ func (db *DB) Get(key []byte) ([]byte, error) {
 		return nil, ErrKeyNotFound
 	}
 
+	return db.getValueByPos(logRecordPos)
+}
+
+func (db *DB) ListKeys() [][]byte {
+	iter := db.index.Iterator(false)
+	keys := make([][]byte, db.index.Size())
+	var idx int
+	for iter.Rewind(); iter.Valid(); iter.Next() {
+		keys[idx] = iter.Key()
+	}
+	return keys
+}
+
+func (db *DB) Fold(fn func(key []byte, value []byte) bool) error {
+	db.mu.RLock()
+	defer db.mu.RUnlock()
+
+	iter := db.index.Iterator(false)
+	for iter.Rewind(); iter.Valid(); iter.Next() {
+		value, err := db.getValueByPos(iter.Value())
+		if err != nil {
+			return err
+		}
+
+		if !fn(iter.Key(), value) {
+			break
+		}
+	}
+	return nil
+}
+
+func (db *DB) getValueByPos(logRecordPos *data.LogRecordPos) ([]byte, error) {
 	// 根据文件 id 找到对应的数据文件
 	var dataFile *data.DataFile
 	if db.activeFile.FileId == logRecordPos.Fid {
