@@ -31,7 +31,7 @@ func TestEncodeLogRecord(t *testing.T) {
 	record3 := &LogRecord{
 		Key:   []byte("name"),
 		Value: []byte("bitcask-kv-go"),
-		Type:  LogRecordDelete,
+		Type:  LogRecordDeleted,
 	}
 	res3, n3 := EncodeLogRecord(record3)
 	assert.NotNil(t, res3)
@@ -66,7 +66,7 @@ func TestDecodeLogRecordHeader(t *testing.T) {
 	assert.NotNil(t, h3)
 	assert.Equal(t, int64(7), size3)
 	assert.Equal(t, uint32(3745121815), h3.crc)
-	assert.Equal(t, LogRecordDelete, h3.recordType)
+	assert.Equal(t, LogRecordDeleted, h3.recordType)
 	assert.Equal(t, uint32(4), h3.keySize)
 	assert.Equal(t, uint32(13), h3.valueSize)
 }
@@ -78,7 +78,7 @@ func TestGetLogRecordCrc(t *testing.T) {
 		Type:  LogRecordNormal,
 	}
 	headerBuf1 := []byte{81, 61, 93, 186, 0, 8, 26}
-	crc1 := getLogRecordCrc(record1, headerBuf1[crc32.Size:])
+	crc1 := getLogRecordCRC(record1, headerBuf1[crc32.Size:])
 	assert.Equal(t, uint32(3126672721), crc1)
 
 	record2 := &LogRecord{
@@ -86,21 +86,21 @@ func TestGetLogRecordCrc(t *testing.T) {
 		Type: LogRecordNormal,
 	}
 	headerBuf2 := []byte{9, 252, 88, 14, 0, 8, 0}
-	crc2 := getLogRecordCrc(record2, headerBuf2[crc32.Size:])
+	crc2 := getLogRecordCRC(record2, headerBuf2[crc32.Size:])
 	assert.Equal(t, uint32(240712713), crc2)
 
 	record3 := &LogRecord{
 		Key:   []byte("name"),
 		Value: []byte("bitcask-kv-go"),
-		Type:  LogRecordDelete,
+		Type:  LogRecordDeleted,
 	}
 	headerBuf3 := []byte{23, 6, 58, 223, 1, 8, 26}
-	crc3 := getLogRecordCrc(record3, headerBuf3[crc32.Size:])
+	crc3 := getLogRecordCRC(record3, headerBuf3[crc32.Size:])
 	assert.Equal(t, uint32(3745121815), crc3)
 }
 
 func TestDataFile_ReadLogRecord(t *testing.T) {
-	dataFile, err := OpenDataFile(os.TempDir(), 222)
+	dataFile, err := OpenDataFile(os.TempDir(), 22)
 	assert.Nil(t, err)
 	assert.NotNil(t, dataFile)
 
@@ -134,7 +134,7 @@ func TestDataFile_ReadLogRecord(t *testing.T) {
 	// 被删除的 LogRecord 在末尾
 	rec3 := &LogRecord{
 		Key:   []byte("1"),
-		Type:  LogRecordDelete,
+		Type:  LogRecordDeleted,
 		Value: []byte(""),
 	}
 	enc3, size3 := EncodeLogRecord(rec3)
