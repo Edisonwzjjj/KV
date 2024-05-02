@@ -29,15 +29,18 @@ const (
 
 	// ART 自适应基数树索引
 	ART
+	BPTree
 )
 
 // NewIndexer 根据类型初始化索引
-func NewIndexer(typ IndexType, dirPath string) Indexer {
+func NewIndexer(typ IndexType, dirPath string, sync bool) Indexer {
 	switch typ {
 	case Btree:
 		return NewBTree()
 	case ART:
 		return NewART()
+	case BPTree:
+		return NewBPTree(dirPath, sync)
 	default:
 		panic("unsupported index type")
 	}

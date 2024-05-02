@@ -23,7 +23,7 @@ func (db *DB) Merge() error {
 
 	if db.isMerging {
 		db.mu.Unlock()
-		return ErrMergeInProgress
+		return ErrMergeIsProgress
 	}
 
 	db.isMerging = true

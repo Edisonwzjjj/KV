@@ -13,15 +13,21 @@ import (
 	"sync"
 )
 
+const (
+	seqkey = "seq-no"
+)
+
 type DB struct {
-	options    Options
-	mu         *sync.RWMutex
-	fileIds    []int                     // 文件 id，只能在加载索引的时候使用，不能在其他的地方更新和使用
-	activeFile *data.DataFile            // 当前活跃数据文件，可以用于写入
-	olderFiles map[uint32]*data.DataFile // 旧的数据文件，只能用于读
-	index      index.Indexer             // 内存索引
-	seqNo      uint64                    // 事务序列号，全局递增 atomic
-	isMerging  bool
+	options         Options
+	mu              *sync.RWMutex
+	fileIds         []int                     // 文件 id，只能在加载索引的时候使用，不能在其他的地方更新和使用
+	activeFile      *data.DataFile            // 当前活跃数据文件，可以用于写入
+	olderFiles      map[uint32]*data.DataFile // 旧的数据文件，只能用于读
+	index           index.Indexer             // 内存索引
+	seqNo           uint64                    // 事务序列号，全局递增 atomic
+	isMerging       bool
+	seqNoFileExists bool
+	isInitial       bool
 }
 
 // Open 打开 bitcask 存储引擎实例
@@ -43,7 +49,7 @@ func Open(options Options) (*DB, error) {
 		options:    options,
 		mu:         new(sync.RWMutex),
 		olderFiles: make(map[uint32]*data.DataFile),
-		index:      index.NewIndexer(options.IndexType),
+		index:      index.NewIndexer(options.IndexType, options.DirPath, options.SyncWrites),
 	}
 
 	//加载 merge 目录
@@ -55,17 +61,24 @@ func Open(options Options) (*DB, error) {
 	if err := db.loadDataFiles(); err != nil {
 		return nil, err
 	}
+	//b+ 磁盘索引
+	if options.IndexType != BPTree {
+		//加载 hint 索引
+		if err := db.loadIndexFromHintFile(); err != nil {
+			return nil, err
+		}
 
-	//加载 hint 索引
-	if err := db.loadIndexFromHintFile(); err != nil {
-		return nil, err
+		// 从数据文件中加载索引
+		if err := db.loadIndexFromDataFiles(); err != nil {
+			return nil, err
+		}
 	}
 
-	// 从数据文件中加载索引
-	if err := db.loadIndexFromDataFiles(); err != nil {
-		return nil, err
+	if options.IndexType == BPTree {
+		if err := db.loadSeqNo(); err != nil {
+			return nil, err
+		}
 	}
-
 	return db, nil
 }
 
@@ -76,6 +89,24 @@ func (db *DB) Close() error {
 	}
 	db.mu.Lock()
 	defer db.mu.Unlock()
+
+	//保存当前事务 seqNo
+	seqNoFile, err := data.OpenSeqNoFile(db.options.DirPath)
+	if err != nil {
+		return err
+	}
+	record := &data.LogRecord{
+		Key:   []byte(seqkey),
+		Value: []byte(strconv.FormatUint(db.seqNo, 10)),
+	}
+	encRecord, _ := data.EncodeLogRecord(record)
+	if err := seqNoFile.Write(encRecord); err != nil {
+		return err
+	}
+
+	if err := seqNoFile.Sync(); err != nil {
+		return err
+	}
 
 	//	关闭当前活跃文件
 	if err := db.activeFile.Close(); err != nil {
@@ -453,4 +484,28 @@ func checkOptions(options Options) error {
 		return errors.New("database data file size must be greater than 0")
 	}
 	return nil
+}
+
+func (db *DB) loadSeqNo() error {
+	fileName := filepath.Join(db.options.DirPath, data.SeqNoFileName)
+	if _, err := os.Stat(fileName); os.IsNotExist(err) {
+		return nil
+	}
+	seqNoFile, err := data.OpenSeqNoFile(db.options.DirPath)
+	if err != nil {
+		return err
+	}
+	record, _, err := seqNoFile.ReadLogRecord(0)
+	if err != nil {
+		return err
+	}
+
+	seqNo, err := strconv.ParseUint(string(record.Value), 10, 64)
+	if err != nil {
+		return err
+	}
+	db.seqNo = seqNo
+	db.seqNoFileExists = true
+
+	return os.Remove(fileName)
 }

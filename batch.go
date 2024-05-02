@@ -3,6 +3,7 @@ package KV
 import (
 	"KV/data"
 	"encoding/binary"
+	"fmt"
 	"sync"
 	"sync/atomic"
 )
@@ -20,6 +21,9 @@ type WriteBatch struct {
 }
 
 func (db *DB) NewWriteBatch(options WriteBatchOptions) *WriteBatch {
+	if db.options.IndexType == BPTree && !db.seqNoFileExists && !db.isInitial {
+		panic(fmt.Sprintf("cannot use write batch: %v", ErrWriteBatchCannotUse))
+	}
 	return &WriteBatch{
 		options:       options,
 		mu:            new(sync.Mutex),
