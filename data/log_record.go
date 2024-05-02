@@ -26,7 +26,7 @@ type LogRecord struct {
 }
 
 // LogRecord 的头部信息
-type logRecordHeader struct {
+type LogRecordHeader struct {
 	crc        uint32        // crc 校验值
 	recordType LogRecordType // 标识 LogRecord 的类型
 	keySize    uint32        // key 的长度
@@ -78,13 +78,23 @@ func EncodeLogRecord(logRecord *LogRecord) ([]byte, int64) {
 	return encBytes, int64(size)
 }
 
+//logRecordPos编码
+
+func EncodeLogRecordPos(pos *LogRecordPos) []byte {
+	buf := make([]byte, binary.MaxVarintLen32+binary.MaxVarintLen64)
+	var idx = 0
+	idx += binary.PutVarint(buf[idx:], int64(pos.Fid))
+	idx += binary.PutVarint(buf[idx:], int64(pos.Offset))
+	return buf[:idx]
+}
+
 // 对字节数组中的 Header 信息进行解码
-func decodeLogRecordHeader(buf []byte) (*logRecordHeader, int64) {
+func DecodeLogRecordHeader(buf []byte) (*LogRecordHeader, int64) {
 	if len(buf) <= 4 {
 		return nil, 0
 	}
 
-	header := &logRecordHeader{
+	header := &LogRecordHeader{
 		crc:        binary.LittleEndian.Uint32(buf[:4]),
 		recordType: buf[4],
 	}
@@ -101,6 +111,17 @@ func decodeLogRecordHeader(buf []byte) (*logRecordHeader, int64) {
 	index += n
 
 	return header, int64(index)
+}
+
+func DecodeLogRecordPos(buf []byte) *LogRecordPos {
+	var idx = 0
+	fileId, n := binary.Varint(buf[idx:])
+	idx += n
+	offset, _ := binary.Varint(buf[idx:])
+	return &LogRecordPos{
+		Fid:    uint32(fileId),
+		Offset: offset,
+	}
 }
 
 func getLogRecordCRC(lr *LogRecord, header []byte) uint32 {

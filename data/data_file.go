@@ -28,7 +28,7 @@ type DataFile struct {
 
 // OpenDataFile 打开新的数据文件
 func OpenDataFile(dirPath string, fileId uint32) (*DataFile, error) {
-	fileName := filepath.Join(dirPath, fmt.Sprintf("%09d", fileId)+DataFileNameSuffix)
+	fileName := GetDataFileName(dirPath, fileId)
 	return NewDataFile(fileName, fileId)
 }
 
@@ -40,6 +40,10 @@ func OpenHintFile(dirPath string) (*DataFile, error) {
 func OpenMergeFinishFile(dirPath string) (*DataFile, error) {
 	fileName := filepath.Join(dirPath, MergeFinishFileName)
 	return NewDataFile(fileName, 0)
+}
+
+func GetDataFileName(dirPath string, fileId uint32) string {
+	return filepath.Join(dirPath, fmt.Sprintf("%09d", fileId)+DataFileNameSuffix)
 }
 
 func NewDataFile(fileName string, fileId uint32) (*DataFile, error) {
@@ -116,7 +120,12 @@ func (df *DataFile) Write(buf []byte) error {
 }
 
 func (df *DataFile) WriteHint(key []byte, pos *LogRecordPos) error {
-	return nil
+	record := &LogRecord{
+		Key:   key,
+		Value: EncodeLogRecordPos(pos),
+	}
+	encRecord, _ := EncodeLogRecord(record)
+	return df.Write(encRecord)
 }
 
 func (df *DataFile) Sync() error {

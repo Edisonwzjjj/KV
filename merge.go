@@ -7,6 +7,7 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
+	"strconv"
 )
 
 const (
@@ -42,6 +43,9 @@ func (db *DB) Merge() error {
 		db.mu.Unlock()
 		return err
 	}
+
+	//记录当前文件，不参与 merge
+	nonMergeFileId := db.activeFile.FileId
 
 	var mergeFiles []*data.DataFile
 	for _, file := range db.olderFiles {
@@ -120,6 +124,22 @@ func (db *DB) Merge() error {
 	if err != nil {
 		return err
 	}
+
+	mergeFinRecord := &data.LogRecord{
+		Key:   []byte(mergeFinishKey),
+		Value: []byte(strconv.Itoa(int(nonMergeFileId))),
+	}
+
+	encRecord, _ := data.EncodeLogRecord(mergeFinRecord)
+
+	if err := mergeFinishFile.Write(encRecord); err != nil {
+		return err
+	}
+
+	if err := mergeFinishFile.Sync(); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -128,4 +148,100 @@ func (db *DB) getMergePath() string {
 	base := path.Base(db.options.DirPath)
 
 	return filepath.Join(dir, base+mergeDirName)
+}
+
+func (db *DB) loadMergeFiles() error {
+	mergePath := db.getMergePath()
+	if _, err := os.Stat(mergePath); os.IsNotExist(err) {
+		return err
+	}
+
+	defer func() {
+		_ = os.RemoveAll(mergePath)
+	}()
+	dirEntries, _ := os.ReadDir(mergePath)
+
+	//查找标识 merge
+	var mergeFinished = false
+	var mergeFileNames []string
+
+	for _, entry := range dirEntries {
+		if entry.Name() == data.MergeFinishFileName {
+			mergeFinished = true
+		}
+		mergeFileNames = append(mergeFileNames, entry.Name())
+	}
+	//未完成
+	if !mergeFinished {
+		return nil
+	}
+
+	nonMergeFileId, err := db.getNonMergeFileId(mergePath)
+	if err != nil {
+		return err
+	}
+
+	//删除旧文件
+	var fileId uint32 = 0
+	for ; fileId < nonMergeFileId; fileId++ {
+		fileName := data.GetDataFileName(mergePath, fileId)
+		if _, err := os.Stat(fileName); err != nil {
+			_ = os.Remove(fileName)
+		}
+
+	}
+
+	//新的数据文件移动过来
+	for _, fileName := range mergeFileNames {
+		srcPath := path.Join(mergePath, fileName)
+		dstPath := path.Join(db.options.DirPath, fileName)
+
+		if err := os.Rename(srcPath, dstPath); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (db *DB) getNonMergeFileId(dirPath string) (uint32, error) {
+	dataFile, err := data.OpenMergeFinishFile(dirPath)
+	if err != nil {
+		return 0, err
+	}
+	logRecord, _, err := dataFile.ReadLogRecord(0)
+	if err != nil {
+		return 0, err
+	}
+
+	nonMergeFileId, err := strconv.Atoi(string(logRecord.Key))
+	if err != nil {
+		return 0, err
+	}
+	return uint32(nonMergeFileId), nil
+}
+
+func (db *DB) loadIndexFromHintFile() error {
+	hintFileName := filepath.Join(db.options.DirPath, data.HintFileName)
+	if _, err := os.Stat(hintFileName); os.IsNotExist(err) {
+		return err
+	}
+	hintFile, err := data.OpenHintFile(hintFileName)
+	if err != nil {
+		return err
+	}
+
+	var offset int64 = 0
+	for {
+		logRecord, size, err := hintFile.ReadLogRecord(offset)
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return err
+		}
+		pos := data.DecodeLogRecordPos(logRecord.Value)
+		db.index.Put(logRecord.Key, pos)
+		offset += size
+	}
+	return nil
 }

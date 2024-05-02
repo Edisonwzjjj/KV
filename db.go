@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -45,8 +46,18 @@ func Open(options Options) (*DB, error) {
 		index:      index.NewIndexer(options.IndexType),
 	}
 
+	//加载 merge 目录
+	if err := db.loadMergeFiles(); err != nil {
+		return nil, err
+	}
+
 	// 加载数据文件
 	if err := db.loadDataFiles(); err != nil {
+		return nil, err
+	}
+
+	//加载 hint 索引
+	if err := db.loadIndexFromHintFile(); err != nil {
 		return nil, err
 	}
 
@@ -341,6 +352,18 @@ func (db *DB) loadIndexFromDataFiles() error {
 		return nil
 	}
 
+	//和 hint 冲突的 index 不加载
+	hasMerge, nonMergeFileId := false, uint32(0)
+	mergeFinishFileName := filepath.Join(db.options.DirPath, data.MergeFinishFileName)
+	if _, err := os.Stat(mergeFinishFileName); err == nil {
+		fid, err := db.getNonMergeFileId(db.options.DirPath)
+		if err != nil {
+			return err
+		}
+		hasMerge = true
+		nonMergeFileId = fid
+	}
+
 	updateIndex := func(key []byte, typ data.LogRecordType, logRecordPos *data.LogRecordPos) {
 		var ok bool
 		if typ == data.LogRecordDeleted {
@@ -358,6 +381,10 @@ func (db *DB) loadIndexFromDataFiles() error {
 	// 遍历所有的文件id，处理文件中的记录
 	for i, fid := range db.fileIds {
 		var fileId = uint32(fid)
+		if hasMerge && fileId < nonMergeFileId {
+			continue
+		}
+
 		var dataFile *data.DataFile
 		if fileId == db.activeFile.FileId {
 			dataFile = db.activeFile
