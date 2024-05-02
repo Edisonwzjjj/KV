@@ -77,7 +77,7 @@ func (df *DataFile) ReadLogRecord(offset int64) (*LogRecord, int64, error) {
 		return nil, 0, err
 	}
 
-	header, headerSize := decodeLogRecordHeader(headerBuf)
+	header, headerSize := DecodeLogRecordHeader(headerBuf)
 	// 下面的两个条件表示读取到了文件末尾，直接返回 EOF 错误
 	if header == nil {
 		return nil, 0, io.EOF
